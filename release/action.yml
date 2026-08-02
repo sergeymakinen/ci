@@ -1,0 +1,144 @@
+name: Release
+description: Create a release using GoReleaser
+inputs:
+  tag:
+    description: The tag to release
+  git-token:
+    description: GitHub token for private Go modules
+  ssh-key:
+    description: SSH key for private Node modules
+  restore-cache-only:
+    description: Only restore cache
+    default: 'true'
+  node-projects:
+    description: Node projects
+  prepare-only:
+    description: Only prepare environment without installing GoReleaser
+    default: 'false'
+  install-only:
+    description: Only install GoReleaser
+    default: 'false'
+  args:
+    description: GoReleaser arguments
+    default: release --clean
+  workdir:
+    description: GoReleaser workdir
+    default: .
+runs:
+  using: composite
+  steps:
+    - name: 'Workaround: mark every directory as safe for Git'
+      shell: sh
+      run: git config --global --add safe.directory '*'
+    - name: Checkout code
+      uses: actions/checkout@v7
+      with:
+        ref: '${{ inputs.tag }}'
+        fetch-depth: 0
+    - name: Check for Node version
+      if: inputs.node-projects != ''
+      id: node-version
+      shell: sh
+      run: |
+        if [ -f .nvmrc ]; then
+          echo "node-version-file=.nvmrc" >>$GITHUB_OUTPUT
+          echo "Use Node version from .nvmrc"
+        elif [ -f .tool-versions ]; then
+          echo "node-version-file=.tool-versions" >>$GITHUB_OUTPUT
+          echo "Use Node version from .tool-versions"
+        else
+          echo "No Node version file found"
+          exit 1
+        fi
+    - name: Set Node projects cache dependency path
+      id: node-cache-dependency
+      if: steps.node-version.outputs.node-version-file != ''
+      shell: bash
+      run: |
+        {
+          echo 'cache-dependency-path<<EOF'
+          echo '${{ inputs.node-projects }}' | sed '/^[[:space:]]*$/d' | sed -e 's/$/\/package-lock.json/'
+          echo EOF
+        } >>$GITHUB_OUTPUT
+    - name: Install Node
+      if: steps.node-version.outputs.node-version-file != ''
+      uses: actions/setup-node@v7
+      with:
+        node-version-file: ${{ steps.node-version.outputs.node-version-file }}
+        cache: ${{ inputs.restore-cache-only == 'false' && 'npm' || '' }}
+        package-manager-cache: ${{ inputs.restore-cache-only == 'false' }}
+        cache-dependency-path: '${{ steps.node-cache-dependency.outputs.cache-dependency-path }}'
+    - name: Set Node cache variables
+      id: node-cache
+      if: steps.node-version.outputs.node-version-file != '' && inputs.restore-cache-only == 'true'
+      shell: sh
+      run: |
+        echo "cache-path=$(npm config get cache)" >>$GITHUB_OUTPUT
+        echo "arch=$(echo '${{ runner.arch }}' | tr '[:upper:]' '[:lower:]')" >>$GITHUB_OUTPUT
+    - name: Set Node cache checksum
+      id: node-cache-checksum
+      if: steps.node-version.outputs.node-version-file != '' && inputs.restore-cache-only == 'true'
+      uses: actions/github-script@v9
+      env:
+        CACHE_DEPENDENCY_PATH: '${{ steps.node-cache-dependency.outputs.cache-dependency-path }}'
+      with:
+        result-encoding: string
+        script: return await glob.hashFiles(process.env.CACHE_DEPENDENCY_PATH);
+    - name: Restore Node cache
+      if: steps.node-version.outputs.node-version-file != '' && inputs.restore-cache-only == 'true'
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ steps.node-cache.outputs.cache-path }}
+        key: node-cache-${{ runner.os }}-${{ steps.node-cache.outputs.arch }}-npm-${{ steps.node-cache-checksum.outputs.result }}
+        restore-keys: node-cache-${{ runner.os }}-${{ steps.node-cache.outputs.arch }}-npm-
+    - name: Install Go
+      id: setup-go
+      uses: actions/setup-go@v7
+      with:
+        go-version: 1.x
+        check-latest: true
+        cache: ${{ inputs.restore-cache-only == 'false' }}
+        cache-dependency-path: ${{ inputs.workdir }}/go.mod
+    - name: Set Go cache variables
+      id: go-cache
+      if: inputs.restore-cache-only == 'true'
+      shell: sh
+      run: |
+        echo "go-mod-cache=$(go env GOMODCACHE)" >>$GITHUB_OUTPUT
+        echo "go-cache=$(go env GOCACHE)" >>$GITHUB_OUTPUT
+        echo "arch=$(echo '${{ runner.arch }}' | tr '[:upper:]' '[:lower:]')" >>$GITHUB_OUTPUT
+    - name: Restore Go cache
+      if: inputs.restore-cache-only == 'true'
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          ${{ steps.go-cache.outputs.go-mod-cache }}
+          ${{ steps.go-cache.outputs.go-cache }}
+        key: setup-go-${{ runner.os }}-${{ steps.go-cache.outputs.arch }}-${{ env.ImageOS && env.ImageOS || 'undefined' }}-go-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles(format('{0}/go.mod', inputs.workdir)) }}
+        restore-keys: setup-go-${{ runner.os }}-${{ steps.go-cache.outputs.arch }}-${{ env.ImageOS && env.ImageOS || 'undefined' }}-go-${{ steps.setup-go.outputs.go-version }}-
+    - name: Set build info
+      shell: sh
+      run: |
+        echo "USER=$(whoami)" >>$GITHUB_ENV
+        echo "HOSTNAME=$(hostname)" >>$GITHUB_ENV
+    - name: Configure git for private modules
+      if: inputs.git-token != ''
+      shell: sh
+      run: git config --global url."https://${{ github.repository_owner }}:${{ inputs.git-token }}@github.com".insteadOf "https://github.com"
+    - name: Install ssh-agent
+      if: inputs.ssh-key != ''
+      uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
+      with:
+        ssh-private-key: ${{ inputs.ssh-key }}
+    - name: Install GoReleaser
+      if: inputs.prepare-only == 'false'
+      uses: goreleaser/goreleaser-action@v7
+      with:
+        distribution: goreleaser
+        version: latest
+        install-only: true
+    - name: Run GoReleaser
+      if: inputs.prepare-only == 'false' && inputs.install-only == 'false'
+      shell: sh
+      run: goreleaser ${{ inputs.args }}
+      working-directory: ${{ inputs.workdir }}

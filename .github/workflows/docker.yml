@@ -1,0 +1,103 @@
+on:
+  schedule:
+    - cron: '0 6 * * 0'
+      timezone: 'Europe/Moscow'
+  workflow_dispatch:
+    inputs:
+      deploy-only:
+        description: 'Deploy only'
+        type: boolean
+permissions:
+  contents: write
+  packages: write
+name: Docker
+jobs:
+  check_for_updates:
+    name: Check for updates
+    runs-on: ubuntu-latest
+    env:
+      INCLUDES: |-
+        {"dockerfile": "Dockerfile", "tag": "debian"}
+        {"dockerfile": "Dockerfile.freebsd", "tag": "debian-freebsd"}
+    outputs:
+      include: ${{ steps.updates.outputs.include }}
+      commit: ${{ steps.updates.outputs.commit }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Set up GitHub Actions user
+        if: inputs.deploy-only != true
+        run: |
+          git config --global user.name github-actions[bot]
+          git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
+      - name: Check for updates
+        id: updates
+        shell: bash
+        run: |
+          latest_tag=$(curl -sS https://hub.docker.com/v2/namespaces/library/repositories/debian/tags/oldstable | jq -r '.digest')
+          matrix_include="["
+          while IFS= read -r include; do
+            dockerfile=$(echo "$include" | jq -r '.dockerfile')
+            current_tag=$(cat "$dockerfile" | sed -En 's/FROM debian\:oldstable@(.+)/\1/p')
+            if [ "$current_tag" != "$latest_tag" ] || [ "${{ inputs.deploy-only }}" = "true" ]; then
+              matrix_include+="$include,"
+              echo "$dockerfile is outdated"
+              if [ "${{ inputs.deploy-only }}" != "true" ]; then
+                sed -i -E "s/FROM debian:oldstable@(.+)/FROM debian:oldstable@$latest_tag/" "$dockerfile"
+                git add "$dockerfile"
+              fi
+            else
+              echo "$dockerfile is up to date"
+            fi
+          done <<< '${{ env.INCLUDES }}'
+          matrix_include="${matrix_include%%,}]"
+          if [ "$matrix_include" != "[]" ]; then
+            if [ "${{ inputs.deploy-only }}" != "true" ]; then
+              git commit -m "chore: update base image"
+              git push
+            fi
+            echo "commit=$(git rev-parse HEAD)" >>$GITHUB_OUTPUT
+          fi
+          echo "include=$matrix_include" >>$GITHUB_OUTPUT
+  deploy:
+    name: Deploy
+    needs: check_for_updates
+    if: needs.check_for_updates.outputs.commit != ''
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.check_for_updates.outputs.include) }}
+      fail-fast: false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.check_for_updates.outputs.commit }}
+          fetch-depth: 0
+      - name: Install QEMU
+        uses: docker/setup-qemu-action@v4
+      - name: Install Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Login to GitHub Packages
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Docker Build Metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          context: git
+          images: ghcr.io/${{ github.repository }}
+          tags: type=raw,value=${{ matrix.tag }}
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}

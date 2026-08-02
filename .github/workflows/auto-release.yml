@@ -1,0 +1,80 @@
+on:
+  workflow_call:
+    inputs:
+      node-projects:
+        type: string
+    outputs:
+      next-tag:
+        value: ${{ jobs.release.outputs.next-tag }}
+permissions:
+  contents: write
+name: Auto Release
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    outputs:
+      next-tag: ${{ steps.git.outputs.next-tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Check for new significant Renovate commits
+        id: git
+        run: |
+          tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "Latest tag: $tag"
+          commits=$(git log ${tag}..HEAD --author="renovate\[bot\]" --oneline -- . ':!.github' 2>/dev/null || echo "")
+          if [ -n "$commits" ]; then
+            if [[ "$tag" == *-* ]]; then
+              next_version=$(npx -y semver "$tag" -i prerelease)
+            else
+              next_version=$(npx -y semver "$tag" -i patch)
+            fi
+            echo "next-version=$next_version" >>$GITHUB_OUTPUT
+            next_tag="v${next_version}"
+            echo "Next tag: $next_tag"
+            echo "next-tag=$next_tag" >>$GITHUB_OUTPUT
+          else
+            echo "No new significant Renovate commits"
+          fi
+      - name: Check for Node version file
+        id: node-version
+        if: steps.git.outputs.next-tag != '' && inputs.node-projects != ''
+        run: |
+          if [ -f .nvmrc ]; then
+            echo "node-version-file=.nvmrc" >>$GITHUB_OUTPUT
+            echo "Use Node version from .nvmrc"
+          elif [ -f .tool-versions ]; then
+            echo "node-version-file=.tool-versions" >>$GITHUB_OUTPUT
+            echo "Use Node version from .tool-versions"
+          else
+            echo "No Node version file found"
+            exit 1
+          fi
+      - name: Install Node
+        if: steps.node-version.outputs.node-version-file != ''
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: ${{ steps.node-version.outputs.node-version-file }}
+      - name: Set up GitHub Actions user
+        if: steps.git.outputs.next-tag != ''
+        run: |
+          git config --global user.name github-actions[bot]
+          git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
+      - name: Set Node project versions
+        if: steps.node-version.outputs.node-version-file != ''
+        shell: bash
+        run: |
+          while IFS= read -r dir; do
+            ( cd "$dir" && npm version "${{ steps.git.outputs.next-version }}" --no-git-tag-version --ignore-scripts )
+            echo "Set Node version in $dir"
+          done <<< $(echo '${{ inputs.node-projects }}' | sed '/^[[:space:]]*$/d')
+          git add .
+          git commit -m "chore: prepare ${{ steps.git.outputs.next-version }}"
+      - name: Tag new version and push
+        if: steps.git.outputs.next-tag != ''
+        run: |
+          git tag -a "${{ steps.git.outputs.next-tag }}" -m "chore: prepare ${{ steps.git.outputs.next-version }}"
+          git push --follow-tags
