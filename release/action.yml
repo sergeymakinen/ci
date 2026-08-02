@@ -10,8 +10,8 @@ inputs:
   restore-cache-only:
     description: Only restore cache
     default: 'true'
-  node-projects:
-    description: Node projects
+  node-directory:
+    description: Node package directory
   prepare-only:
     description: Only prepare environment without installing GoReleaser
     default: 'false'
@@ -36,7 +36,7 @@ runs:
         ref: '${{ inputs.tag }}'
         fetch-depth: 0
     - name: Check for Node version
-      if: inputs.node-projects != ''
+      if: inputs.node-directory != ''
       id: node-version
       shell: sh
       run: |
@@ -57,7 +57,7 @@ runs:
       run: |
         {
           echo 'cache-dependency-path<<EOF'
-          echo '${{ inputs.node-projects }}' | sed '/^[[:space:]]*$/d' | sed -e 's/$/\/package-lock.json/'
+          echo '${{ inputs.node-directory }}' | sed '/^[[:space:]]*$/d' | sed -e 's/$/\/package-lock.json/'
           echo EOF
         } >>$GITHUB_OUTPUT
     - name: Install Node
