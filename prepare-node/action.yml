@@ -1,0 +1,64 @@
+name: Prepare Node
+description: Prepare a Node environment
+inputs:
+  tag:
+    description: The tag to release
+  ssh-key:
+    description: SSH key for private Node modules
+  restore-cache-only:
+    description: Only restore cache
+    default: 'false'
+  working-directory:
+    description: Working directory containing a Node package
+    default: .
+runs:
+  using: composite
+  steps:
+    - name: 'Workaround: mark every directory as safe for Git'
+      shell: sh
+      run: git config --global --add safe.directory '*'
+    - name: Checkout code
+      uses: actions/checkout@v7
+      with:
+        ref: '${{ inputs.tag }}'
+        fetch-depth: 0
+    - name: Check for Node version
+      id: node-version
+      shell: sh
+      run: |
+        if [ -f .nvmrc ]; then
+          echo "node-version-file=.nvmrc" >>$GITHUB_OUTPUT
+          echo "Use Node version from .nvmrc"
+        elif [ -f .tool-versions ]; then
+          echo "node-version-file=.tool-versions" >>$GITHUB_OUTPUT
+          echo "Use Node version from .tool-versions"
+        else
+          echo "No Node version file found"
+          exit 1
+        fi
+    - name: Install Node
+      uses: actions/setup-node@v7
+      with:
+        node-version-file: ${{ steps.node-version.outputs.node-version-file }}
+        cache: ${{ inputs.restore-cache-only == 'false' && 'npm' || '' }}
+        package-manager-cache: ${{ inputs.restore-cache-only == 'false' }}
+        cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+    - name: Set Node cache variables
+      id: node-cache
+      if: inputs.restore-cache-only == 'true'
+      shell: sh
+      run: |
+        echo "cache-path=$(npm config get cache)" >>$GITHUB_OUTPUT
+        echo "arch=$(echo '${{ runner.arch }}' | tr '[:upper:]' '[:lower:]')" >>$GITHUB_OUTPUT
+    - name: Restore Node cache
+      if: inputs.restore-cache-only == 'true'
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ steps.node-cache.outputs.cache-path }}
+        key: node-cache-${{ runner.os }}-${{ steps.node-cache.outputs.arch }}-npm-${{ hashFiles(format('{0}/package-lock.json', inputs.working-directory)) }}
+        restore-keys: node-cache-${{ runner.os }}-${{ steps.node-cache.outputs.arch }}-npm-
+    - name: Install ssh-agent
+      if: inputs.ssh-key != ''
+      uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
+      with:
+        ssh-private-key: ${{ inputs.ssh-key }}

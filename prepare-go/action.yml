@@ -1,0 +1,53 @@
+name: Prepare Go
+description: Prepare a Go environment
+inputs:
+  tag:
+    description: The tag to checkout
+  git-token:
+    description: GitHub token for private Go modules
+  restore-cache-only:
+    description: Only restore cache
+    default: 'false'
+  working-directory:
+    description: Working directory containing a Go module
+    default: .
+runs:
+  using: composite
+  steps:
+    - name: 'Workaround: mark every directory as safe for Git'
+      shell: sh
+      run: git config --global --add safe.directory '*'
+    - name: Checkout code
+      uses: actions/checkout@v7
+      with:
+        ref: '${{ inputs.tag }}'
+        fetch-depth: 0
+    - name: Install Go
+      id: setup-go
+      uses: actions/setup-go@v7
+      with:
+        go-version: 1.x
+        check-latest: true
+        cache: ${{ inputs.restore-cache-only == 'false' }}
+        cache-dependency-path: ${{ inputs.working-directory }}/go.mod
+    - name: Set Go cache variables
+      id: go-cache
+      if: inputs.restore-cache-only == 'true'
+      shell: sh
+      run: |
+        echo "go-mod-cache=$(go env GOMODCACHE)" >>$GITHUB_OUTPUT
+        echo "go-cache=$(go env GOCACHE)" >>$GITHUB_OUTPUT
+        echo "arch=$(echo '${{ runner.arch }}' | tr '[:upper:]' '[:lower:]')" >>$GITHUB_OUTPUT
+    - name: Restore Go cache
+      if: inputs.restore-cache-only == 'true'
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          ${{ steps.go-cache.outputs.go-mod-cache }}
+          ${{ steps.go-cache.outputs.go-cache }}
+        key: setup-go-${{ runner.os }}-${{ steps.go-cache.outputs.arch }}-${{ env.ImageOS && env.ImageOS || 'undefined' }}-go-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles(format('{0}/go.mod', inputs.workdir)) }}
+        restore-keys: setup-go-${{ runner.os }}-${{ steps.go-cache.outputs.arch }}-${{ env.ImageOS && env.ImageOS || 'undefined' }}-go-${{ steps.setup-go.outputs.go-version }}-
+    - name: Configure git for private modules
+      if: inputs.git-token != ''
+      shell: sh
+      run: git config --global url."https://${{ github.repository_owner }}:${{ inputs.git-token }}@github.com".insteadOf "https://github.com"
