@@ -96,7 +96,6 @@ runs:
       uses: actions/setup-go@v7
       with:
         go-version: 1.x
-        check-latest: true
         cache: ${{ inputs.restore-cache-only == 'false' }}
         cache-dependency-path: ${{ inputs.workdir }}/go.mod
     - name: Set Go cache variables
