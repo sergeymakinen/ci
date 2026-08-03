@@ -50,7 +50,7 @@ runs:
           echo "No Node version file found"
           exit 1
         fi
-    - name: Set Node projects cache dependency path
+    - name: Set Node cache dependency path
       id: node-cache-dependency
       if: steps.node-version.outputs.node-version-file != ''
       shell: bash

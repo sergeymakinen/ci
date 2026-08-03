@@ -2,12 +2,14 @@ name: Prepare Node
 description: Prepare a Node environment
 inputs:
   tag:
-    description: The tag to release
+    description: The tag to checkout
   ssh-key:
     description: SSH key for private Node modules
   restore-cache-only:
     description: Only restore cache
     default: 'false'
+  node-directory:
+    description: Node package directory to cache
   working-directory:
     description: Working directory containing a Node package
     default: .
@@ -36,13 +38,22 @@ runs:
           echo "No Node version file found"
           exit 1
         fi
+    - name: Set Node cache dependency path
+      id: node-cache-dependency
+      shell: bash
+      run: |
+        {
+          echo 'cache-dependency-path<<EOF'
+          echo '${{ inputs.node-directory && inputs.node-directory || inputs.working-directory }}' | sed '/^[[:space:]]*$/d' | sed -e 's/$/\/package-lock.json/'
+          echo EOF
+        } >>$GITHUB_OUTPUT
     - name: Install Node
       uses: actions/setup-node@v7
       with:
         node-version-file: ${{ steps.node-version.outputs.node-version-file }}
         cache: ${{ inputs.restore-cache-only == 'false' && 'npm' || '' }}
         package-manager-cache: ${{ inputs.restore-cache-only == 'false' }}
-        cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+        cache-dependency-path: '${{ steps.node-cache-dependency.outputs.cache-dependency-path }}'
     - name: Set Node cache variables
       id: node-cache
       if: inputs.restore-cache-only == 'true'
@@ -50,12 +61,21 @@ runs:
       run: |
         echo "cache-path=$(npm config get cache)" >>$GITHUB_OUTPUT
         echo "arch=$(echo '${{ runner.arch }}' | tr '[:upper:]' '[:lower:]')" >>$GITHUB_OUTPUT
+    - name: Set Node cache checksum
+      id: node-cache-checksum
+      if: inputs.restore-cache-only == 'true'
+      uses: actions/github-script@v9
+      env:
+        CACHE_DEPENDENCY_PATH: '${{ steps.node-cache-dependency.outputs.cache-dependency-path }}'
+      with:
+        result-encoding: string
+        script: return await glob.hashFiles(process.env.CACHE_DEPENDENCY_PATH);
     - name: Restore Node cache
       if: inputs.restore-cache-only == 'true'
       uses: actions/cache/restore@v6
       with:
         path: ${{ steps.node-cache.outputs.cache-path }}
-        key: node-cache-${{ runner.os }}-${{ steps.node-cache.outputs.arch }}-npm-${{ hashFiles(format('{0}/package-lock.json', inputs.working-directory)) }}
+        key: node-cache-${{ runner.os }}-${{ steps.node-cache.outputs.arch }}-npm-${{ steps.node-cache-checksum.outputs.result }}
         restore-keys: node-cache-${{ runner.os }}-${{ steps.node-cache.outputs.arch }}-npm-
     - name: Install ssh-agent
       if: inputs.ssh-key != ''
