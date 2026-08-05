@@ -45,7 +45,7 @@ runs:
         path: |
           ${{ steps.go-cache.outputs.go-mod-cache }}
           ${{ steps.go-cache.outputs.go-cache }}
-        key: setup-go-${{ runner.os }}-${{ steps.go-cache.outputs.arch }}-${{ env.ImageOS && env.ImageOS || 'undefined' }}-go-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles(format('{0}/go.mod', inputs.workdir)) }}
+        key: setup-go-${{ runner.os }}-${{ steps.go-cache.outputs.arch }}-${{ env.ImageOS && env.ImageOS || 'undefined' }}-go-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles(format('{0}/go.mod', inputs.working-directory)) }}
         restore-keys: setup-go-${{ runner.os }}-${{ steps.go-cache.outputs.arch }}-${{ env.ImageOS && env.ImageOS || 'undefined' }}-go-${{ steps.setup-go.outputs.go-version }}-
     - name: Configure git for private modules
       if: inputs.git-token != ''
