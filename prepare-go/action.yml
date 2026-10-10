@@ -50,4 +50,4 @@ runs:
     - name: Configure git for private modules
       if: inputs.git-token != ''
       shell: sh
-      run: git config --global url."https://${{ github.repository_owner }}:${{ inputs.git-token }}@github.com".insteadOf "https://github.com"
+      run: git config --global url."https://${{ github.repository_owner }}:${{ inputs.git-token }}@github.com/".insteadOf "https://github.com/"

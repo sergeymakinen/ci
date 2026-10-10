@@ -124,7 +124,7 @@ runs:
     - name: Configure git for private modules
       if: inputs.git-token != ''
       shell: sh
-      run: git config --global url."https://${{ github.repository_owner }}:${{ inputs.git-token }}@github.com".insteadOf "https://github.com"
+      run: git config --global url."https://${{ github.repository_owner }}:${{ inputs.git-token }}@github.com/".insteadOf "https://github.com/"
     - name: Install ssh-agent
       if: inputs.ssh-key != ''
       uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
