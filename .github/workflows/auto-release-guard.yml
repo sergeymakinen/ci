@@ -1,0 +1,20 @@
+on:
+  workflow_call:
+permissions:
+  actions: write
+name: Auto Release Guard
+jobs:
+  auto_release_guard:
+    name: Auto Release Guard
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check Auto Release state
+        id: state
+        run: |
+          state=$(gh api "repos/${{ github.repository }}/actions/workflows/auto-release.yml" --jq .state)
+          echo "state=$state" >>$GITHUB_OUTPUT
+      - name: Re-enable Auto Release
+        if: steps.state.outputs.state == 'disabled_inactivity'
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/auto-release.yml/enable"
