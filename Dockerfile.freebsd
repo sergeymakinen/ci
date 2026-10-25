@@ -1,4 +1,4 @@
-FROM debian:oldstable@sha256:6eb75d1db45442e2fc1a3a0174ae7a5ef104b82c5c0bc83e4f806c50bfd75a62
+FROM debian:oldstable@sha256:c91bf444bfe036fbc1a38da69b225ca1237e8397312fddec11f62d9c5c6aa074
 LABEL maintainer="Sergey Makinen <sergey@makinen.ru>"
 
 RUN apt-get update && \
