@@ -35,7 +35,7 @@ runs:
           echo "node-version-file=.tool-versions" >>$GITHUB_OUTPUT
           echo "Use Node version from .tool-versions"
         else
-          echo "No Node version file found"
+          echo "::error::No Node version file found"
           exit 1
         fi
     - name: Set Node cache dependency path
