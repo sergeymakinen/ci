@@ -17,4 +17,6 @@ jobs:
           echo "state=$state" >>$GITHUB_OUTPUT
       - name: Re-enable Auto Release
         if: steps.state.outputs.state == 'disabled_inactivity'
-        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/auto-release.yml/enable"
+        run: |
+          gh api -X PUT "repos/${{ github.repository }}/actions/workflows/auto-release.yml/enable"
+          echo "::notice::Auto Release was re-enabled"
