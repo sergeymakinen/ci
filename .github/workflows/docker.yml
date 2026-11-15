@@ -15,12 +15,7 @@ jobs:
   check_for_updates:
     name: Check for updates
     runs-on: ubuntu-latest
-    env:
-      INCLUDES: |-
-        {"dockerfile": "Dockerfile", "tag": "debian"}
-        {"dockerfile": "Dockerfile.freebsd", "tag": "debian-freebsd"}
     outputs:
-      include: ${{ steps.updates.outputs.include }}
       commit: ${{ steps.updates.outputs.commit }}
     steps:
       - name: Checkout code
@@ -34,40 +29,37 @@ jobs:
           git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
       - name: Check for updates
         id: updates
+        if: inputs.deploy-only != true
         shell: bash
         run: |
           latest_tag=$(curl -f -sS https://hub.docker.com/v2/namespaces/library/repositories/debian/tags/oldstable | jq -r '.digest')
-          matrix_include="["
-          while IFS= read -r include; do
-            dockerfile=$(echo "$include" | jq -r '.dockerfile')
-            current_tag=$(cat "$dockerfile" | sed -En 's/FROM debian\:oldstable@(.+)/\1/p')
-            if [ "$current_tag" != "$latest_tag" ] || [ "${{ inputs.deploy-only }}" = "true" ]; then
-              matrix_include+="$include,"
-              echo "$dockerfile is outdated"
-              if [ "${{ inputs.deploy-only }}" != "true" ]; then
-                sed -i -E "s/FROM debian:oldstable@(.+)/FROM debian:oldstable@$latest_tag/" "$dockerfile"
-                git add "$dockerfile"
-              fi
-            else
-              echo "$dockerfile is up to date"
-            fi
-          done <<< '${{ env.INCLUDES }}'
-          matrix_include="${matrix_include%%,}]"
-          if [ "$matrix_include" != "[]" ]; then
-            if [ "${{ inputs.deploy-only }}" != "true" ]; then
-              git commit -m "chore: update base image"
-              git push
-            fi
+          if [[ ! $latest_tag =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Unexpected digest: $latest_tag"
+            exit 1
+          fi
+
+          current_tag=$(sed -En 's/^FROM debian:oldstable@([^ ]+) AS debian$/\1/p' Dockerfile)
+          if [[ $current_tag == "$latest_tag" ]]; then
+            echo "Dockerfile is up to date"
+          else
+            echo "Dockerfile is outdated"
+            sed -i -E "s/^FROM debian:oldstable@[^ ]+/FROM debian:oldstable@$latest_tag/" Dockerfile
+            # Dated tag sharing the digest, e.g. `oldstable-20261104`.
+            latest_version=$(curl -f -sS "https://hub.docker.com/v2/namespaces/library/repositories/debian/tags?name=oldstable-&ordering=last_updated&page_size=100" | jq -r --arg digest "$latest_tag" 'first(.results[] | select(.digest == $digest and (.name | test("^oldstable-[0-9]+$"))) | .name) // empty')
+            git commit -am "chore: update base image to debian:${latest_version:-oldstable@$latest_tag}"
+            git push
             echo "commit=$(git rev-parse HEAD)" >>$GITHUB_OUTPUT
           fi
-          echo "include=$matrix_include" >>$GITHUB_OUTPUT
+
   deploy:
     name: Deploy
     needs: check_for_updates
-    if: needs.check_for_updates.outputs.commit != ''
+    if: needs.check_for_updates.outputs.commit != '' || inputs.deploy-only == true
     strategy:
       matrix:
-        include: ${{ fromJSON(needs.check_for_updates.outputs.include) }}
+        target:
+          - debian
+          - debian-freebsd
       fail-fast: false
     runs-on: ubuntu-latest
     steps:
@@ -92,12 +84,12 @@ jobs:
         with:
           context: git
           images: ghcr.io/${{ github.repository }}
-          tags: type=raw,value=${{ matrix.tag }}
+          tags: type=raw,value=${{ matrix.target }}
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
           push: true
           platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
